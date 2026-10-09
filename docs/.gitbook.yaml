@@ -1,0 +1,6 @@
+# GitBook space configuration (paths are relative to this folder)
+root: ./
+
+structure:
+  readme: README.md
+  summary: SUMMARY.md

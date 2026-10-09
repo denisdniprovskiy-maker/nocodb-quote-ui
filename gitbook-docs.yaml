@@ -1,0 +1,12 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: Облік замовлень
+  structure:
+    - type: space
+      key: quote-ui-docs
+      title: Облік замовлень — Quote Order Management UI
+      path: docs
+      default: true
+      content:
+        directory: ./docs
+        language: uk
