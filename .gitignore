@@ -1,0 +1,12 @@
+# Secrets: NocoDB API token and the MCP server key
+.env
+.mcp.json
+
+# CRM data: artifact snapshot and backups of deleted records
+dist/
+backups/
+
+# Local Claude settings
+.claude/settings.local.json
+
+node_modules/

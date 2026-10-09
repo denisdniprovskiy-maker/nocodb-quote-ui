@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Облік замовлень</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M10 8h9l5 5v11a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="#/">
+        <span class="brand-mark" aria-hidden="true">ОЗ</span>
+        <span class="brand-text"><strong>Облік замовлень</strong><small>Замовлення та клієнти</small></span>
+      </a>
+      <nav class="nav" id="nav" aria-label="Розділи"></nav>
+      <div class="sidebar-foot">
+        <span class="readonly-badge" id="readonly-badge"></span>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <form class="global-search" id="global-search" role="search">
+          <input type="search" id="global-search-input" placeholder="Пошук по всіх розділах…" aria-label="Пошук по всіх розділах" autocomplete="off">
+        </form>
+        <div class="topbar-meta">
+          <span id="updated-at"></span>
+          <button type="button" class="btn" id="refresh-btn">Оновити</button>
+        </div>
+      </header>
+      <main id="view" class="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

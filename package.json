@@ -1,0 +1,13 @@
+{
+  "name": "nocodb-quote-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Read-only Quote Order Management UI (Ukrainian) on top of the NocoDB v3 API",
+  "scripts": {
+    "start": "node --use-system-ca server.js",
+    "build:artifact": "node --use-system-ca build-artifact.js"
+  },
+  "engines": {
+    "node": ">=22.15"
+  }
+}

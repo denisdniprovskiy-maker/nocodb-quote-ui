@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "quote-ui",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--use-system-ca",
+        "server.js"
+      ],
+      "port": 5180
+    }
+  ]
+}
