@@ -1,12 +1,31 @@
 $schema: https://api.gitbook.com/gitbook-docs.yaml
 site:
-  title: Облік замовлень
+  title: BAbasics Docs
   structure:
-    - type: space
-      key: quote-ui-docs
-      title: Облік замовлень — Quote Order Management UI
-      path: docs
+    - type: section
+      key: section-1
+      title: BAbasics Docs
+      path: babasics-docs
       default: true
-      content:
-        directory: ./docs
-        language: uk
+      children:
+        - type: space
+          key: space-1
+          title: BAbasics Docs
+          path: untitled
+          default: true
+          content:
+            directory: ./untitled
+    - type: section
+      key: section-2
+      title: Product Docs
+      path: product-docs
+      description: ""
+      children:
+        - type: space
+          key: space-2
+          title: Product Docs
+          path: product-docs
+          default: true
+          draft: true
+          content:
+            directory: ./product-docs
