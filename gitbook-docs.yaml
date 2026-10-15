@@ -14,7 +14,7 @@ site:
           path: untitled
           default: true
           content:
-            directory: ./untitled
+            directory: ./docs
     - type: section
       key: section-2
       title: Product Docs
