@@ -29,3 +29,16 @@ site:
           draft: true
           content:
             directory: ./product-docs
+    - type: section
+      key: section-3
+      title: Untitled
+      path: untitled
+      children:
+        - type: space
+          key: space-3
+          title: Untitled
+          path: untitled
+          default: true
+          draft: true
+          content:
+            directory: ./untitled-1
