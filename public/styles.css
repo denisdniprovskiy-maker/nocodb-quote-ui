@@ -20,6 +20,15 @@
   --accent-soft: rgba(42, 120, 214, 0.1);
   --series-1: #2a78d6;
   --danger: #b42f2f;
+  --good: #0ca30c;
+  --good-ink: #006300;
+  --good-soft: rgba(12, 163, 12, 0.12);
+  --warning: #fab219;
+  --warning-ink: #7a5000;
+  --warning-soft: rgba(250, 178, 25, 0.18);
+  --critical: #d03b3b;
+  --critical-ink: #a32a2a;
+  --critical-soft: rgba(208, 59, 59, 0.12);
   --tip-bg: #0b0b0b;
   --tip-ink: #ffffff;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
@@ -49,6 +58,15 @@
     --accent-soft: rgba(57, 135, 229, 0.18);
     --series-1: #3987e5;
     --danger: #e66767;
+    --good: #0ca30c;
+    --good-ink: #4cc94c;
+    --good-soft: rgba(12, 163, 12, 0.2);
+    --warning: #fab219;
+    --warning-ink: #fab219;
+    --warning-soft: rgba(250, 178, 25, 0.16);
+    --critical: #d03b3b;
+    --critical-ink: #ef7a7a;
+    --critical-soft: rgba(208, 59, 59, 0.2);
     --tip-bg: #ffffff;
     --tip-ink: #0b0b0b;
     --shadow: none;
@@ -75,6 +93,15 @@
   --accent-soft: rgba(57, 135, 229, 0.18);
   --series-1: #3987e5;
   --danger: #e66767;
+  --good: #0ca30c;
+  --good-ink: #4cc94c;
+  --good-soft: rgba(12, 163, 12, 0.2);
+  --warning: #fab219;
+  --warning-ink: #fab219;
+  --warning-soft: rgba(250, 178, 25, 0.16);
+  --critical: #d03b3b;
+  --critical-ink: #ef7a7a;
+  --critical-soft: rgba(208, 59, 59, 0.2);
   --tip-bg: #ffffff;
   --tip-ink: #0b0b0b;
   --shadow: none;
@@ -414,6 +441,46 @@ a.ext .icon { width: 12px; height: 12px; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Payment status: a coloured dot plus a text label, so colour never carries meaning alone. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--status-bg);
+  color: var(--status-ink);
+}
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-dot); flex: none; }
+.status-good { --status-bg: var(--good-soft); --status-ink: var(--good-ink); --status-dot: var(--good); }
+.status-warning { --status-bg: var(--warning-soft); --status-ink: var(--warning-ink); --status-dot: var(--warning); }
+.status-neutral { --status-bg: var(--surface-3); --status-ink: var(--ink-2); --status-dot: var(--axis); }
+.status-critical { --status-bg: var(--critical-soft); --status-ink: var(--critical-ink); --status-dot: var(--critical); }
+
+/* Payment check: the button and its result sit under the payment status. */
+.payment-cell { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.check-btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--link);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.check-btn:hover:not(:disabled) { background: var(--surface-2); }
+.check-btn:disabled { color: var(--muted); cursor: progress; }
+button.status { border: 0; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+button.status:hover { filter: brightness(0.96); }
+.status-icon { font-size: 11px; line-height: 1; }
 
 .pill {
   display: inline-block;

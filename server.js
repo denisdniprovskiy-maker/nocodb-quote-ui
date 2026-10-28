@@ -7,12 +7,19 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { TOKEN, TABLES, UpstreamError, fetchAllRecords, describeNetworkError } = require('./nocodb');
+const { TOKEN, TABLES, UpstreamError, fetchAllRecords, getRecord, describeNetworkError } = require('./nocodb');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT) || 5180;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// Payment confirmations arrive at webhook.site as GET requests with the query parameters
+// orderNumber (= Quote_ID), amount, date and paymentConfirmed ("true"/"false").
+// Anyone with the token can read those requests, so it lives in .env, not in the code.
+const PAYMENT_WEBHOOK_TOKEN = process.env.PAYMENT_WEBHOOK_TOKEN;
+const PAYMENTS_CACHE_MS = 10 * 1000;
+const PAYMENTS_MAX_PAGES = 20;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -61,6 +68,99 @@ function getRecords(entity, refresh) {
   return entry.promise;
 }
 
+async function fetchPaymentRequests() {
+  const all = [];
+  for (let page = 1; page <= PAYMENTS_MAX_PAGES; page++) {
+    const url = `https://webhook.site/token/${encodeURIComponent(PAYMENT_WEBHOOK_TOKEN)}/requests?sorting=newest&per_page=100&page=${page}`;
+    const res = await fetch(url, { headers: { accept: 'application/json' } });
+    if (!res.ok) throw new Error(`webhook.site responded with ${res.status}`);
+    const body = await res.json();
+    const data = body.data || [];
+    all.push(...data);
+    if (body.is_last_page !== false || !data.length) break;
+  }
+  return all;
+}
+
+let paymentsCache = null; // { at, promise }
+
+function getPaymentRequests() {
+  if (paymentsCache && Date.now() - paymentsCache.at < PAYMENTS_CACHE_MS) return paymentsCache.promise;
+  const entry = { at: Date.now(), promise: fetchPaymentRequests() };
+  entry.promise.catch(() => {
+    if (paymentsCache === entry) paymentsCache = null;
+  });
+  paymentsCache = entry;
+  return entry.promise;
+}
+
+// webhook.site reports created_at as "YYYY-MM-DD HH:mm:ss" in UTC.
+function webhookTimeToIso(value) {
+  const d = new Date(`${String(value).replace(' ', 'T')}Z`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+async function findPayments(orderNumber) {
+  const wanted = orderNumber.trim().toLowerCase();
+  const requests = await getPaymentRequests();
+  return requests
+    .filter((r) => String(r.query?.orderNumber ?? '').trim().toLowerCase() === wanted)
+    .map((r) => ({
+      receivedAt: webhookTimeToIso(r.created_at),
+      amount: r.query.amount ?? null,
+      date: r.query.date ?? null,
+      confirmed: String(r.query.paymentConfirmed ?? '').trim().toLowerCase() === 'true',
+    }));
+}
+
+const isWaitingStatus = (v) => {
+  const s = String(v ?? '').trim().toLowerCase();
+  return s === '' || s === 'waiting for payment';
+};
+const isPaidStatus = (v) => String(v ?? '').trim().toLowerCase() === 'paid';
+
+// Read-only payment check: the server reads the quote from NocoDB and looks for a
+// confirmed payment on webhook.site. Nothing is written anywhere.
+async function checkPayment(id) {
+  const quote = await getRecord('quotes', id);
+  const { Quote_ID: orderNumber, Amount: amount, Payment_Status: status } = quote.fields;
+  if (isPaidStatus(status)) return { outcome: 'already-paid', status: 'Paid' };
+  if (!isWaitingStatus(status)) return { outcome: 'not-waiting', status };
+  if (!orderNumber) return { outcome: 'not-found', matches: [] };
+
+  paymentsCache = null; // always read the latest confirmations for an explicit check
+  const matches = await findPayments(String(orderNumber));
+  const confirmed = matches.filter((m) => m.confirmed);
+  if (!confirmed.length) return { outcome: 'not-found', matches };
+
+  const sameAmount = (m) => {
+    const paid = Number(String(m.amount ?? '').replace(',', '.'));
+    return typeof amount === 'number' && Number.isFinite(paid) && Math.abs(paid - amount) < 0.005;
+  };
+  const payment = confirmed.find(sameAmount);
+  if (!payment) return { outcome: 'amount-mismatch', matches, amount };
+  return { outcome: 'found', payment, matches };
+}
+
+async function handleCheckPayment(res, rawId) {
+  if (!TOKEN) return sendJson(res, 500, { error: 'NOCODB_TOKEN не задано у файлі .env' });
+  if (!PAYMENT_WEBHOOK_TOKEN) {
+    return sendJson(res, 503, { error: 'Перевірку оплат не налаштовано: додайте PAYMENT_WEBHOOK_TOKEN у файл .env і перезапустіть сервер.' });
+  }
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return sendJson(res, 400, { error: 'Некоректний номер замовлення' });
+  try {
+    return sendJson(res, 200, { id, checkedAt: new Date().toISOString(), ...(await checkPayment(id)) });
+  } catch (err) {
+    if (err instanceof UpstreamError) {
+      console.error(`[payments] NocoDB ${err.message}: ${err.detail}`);
+      return sendJson(res, 502, { error: err.status === 404 ? 'Замовлення не знайдено в NocoDB.' : describeNetworkError(err) });
+    }
+    console.error('[payments]', err.message || err);
+    return sendJson(res, 502, { error: 'Не вдалося перевірити оплату (webhook.site або NocoDB недоступні). Спробуйте ще раз.' });
+  }
+}
+
 function sendJson(res, status, payload) {
   res.writeHead(status, {
     ...SECURITY_HEADERS,
@@ -94,12 +194,13 @@ function serveStatic(pathname, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD');
     return sendJson(res, 405, { error: 'Лише перегляд: дозволені тільки GET-запити.' });
   }
 
-  const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname === '/api/health') {
       return sendJson(res, 200, { ok: true, configured: Boolean(TOKEN), entities: Object.keys(TABLES) });
@@ -112,6 +213,9 @@ const server = http.createServer(async (req, res) => {
       if (!TOKEN) return sendJson(res, 500, { error: 'NOCODB_TOKEN не задано у файлі .env' });
       return sendJson(res, 200, await getRecords(entity, url.searchParams.has('refresh')));
     }
+
+    const paymentCheck = url.pathname.match(/^\/api\/quotes\/([^/]+)\/payment$/);
+    if (paymentCheck) return handleCheckPayment(res, paymentCheck[1]);
 
     if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'Не знайдено' });
     return serveStatic(url.pathname, res);

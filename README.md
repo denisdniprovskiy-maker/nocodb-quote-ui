@@ -45,6 +45,23 @@ included in the snapshot. Anyone who can open the artifact can read that data.
 | `NOCODB_BASE_ID` | no       | `pbje4jyruzt4csb`        |
 | `PORT` / `HOST`  | no       | `5180` / `127.0.0.1`     |
 
+## Payment check
+
+Orders waiting for payment ("Очікує оплати") get a **Перевірити оплату** button, in the
+list and on the order page. It calls `GET /api/quotes/:id/payment`. The server reads the
+quote from NocoDB and looks for a payment confirmation on webhook.site. Each confirmation
+is a GET request with the query parameters `orderNumber` (= `Quote_ID`), `amount`, `date`
+and `paymentConfirmed`. The result is one of:
+
+- "Оплата замовлення знайдена!": a confirmed payment with the same amount as the order.
+- "Оплату знайдено, але сума не збігається": a confirmed payment with a different amount.
+- "На жаль, оплата не знайдена": no confirmed payment.
+
+The check only reads data: the order's status in NocoDB is not changed. Set
+`PAYMENT_WEBHOOK_TOKEN` in `.env` (the part after `/token/` in the webhook.site API
+address); the token lets anyone read those requests, so keep it out of git. The button is
+not shown in the Claude Artifact, which can't reach external sites.
+
 ## How it works
 
 - `server.js` serves `public/` and exposes `GET /api/records/:entity`. It pages through
@@ -52,7 +69,7 @@ included in the snapshot. Anyone who can open the artifact can read that data.
   button forces a reload.
 - The token stays on the server. The browser never receives it.
 - **Read-only:** the server rejects every method except GET/HEAD with `405`, and it only
-  issues GET requests to NocoDB.
+  issues GET requests to NocoDB and webhook.site.
 - NocoDB Cloud allows 5 requests/second per user and blocks for 30 s on a 429. The
   server sends requests one at a time, about 2 per second, and pauses the whole queue
   on a 429. A cold start takes roughly 10–15 s.

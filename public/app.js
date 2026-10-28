@@ -50,6 +50,15 @@ const ACTIVITY_TYPE_LABELS = { Call: 'Дзвінок', Meeting: 'Зустріч'
 const ACTIVITY_TYPE_ICONS = { Call: 'phone', Meeting: 'calendar', Email: 'mail' };
 const CONTACT_STATUS_LABELS = { Active: 'Активний', Lead: 'Потенційний клієнт', Customer: 'Клієнт', Inactive: 'Неактивний' };
 
+// Quotes.Payment_Status — текстове поле, тому порівнюємо без урахування регістру,
+// а невідоме значення показуємо як є (нейтральним кольором).
+const PAYMENT_STATUSES = {
+  'waiting for payment': { key: 'waiting', label: 'Очікує оплати', tone: 'warning' },
+  paid: { key: 'paid', label: 'Оплачено', tone: 'good' },
+  canceled: { key: 'canceled', label: 'Скасовано', tone: 'neutral' },
+  cancelled: { key: 'canceled', label: 'Скасовано', tone: 'neutral' },
+};
+
 const MONTHS_SHORT = ['січ.', 'лют.', 'бер.', 'квіт.', 'трав.', 'черв.', 'лип.', 'серп.', 'вер.', 'жовт.', 'лист.', 'груд.'];
 const MONTHS_LONG = ['Січень', 'Лютий', 'Березень', 'Квітень', 'Травень', 'Червень', 'Липень', 'Серпень', 'Вересень', 'Жовтень', 'Листопад', 'Грудень'];
 
@@ -245,6 +254,131 @@ const refList = (key, recs) => (recs.length ? recs.map((r) => ref(key, r)).join(
 const primaryLink = (key, rec, label) =>
   `<a class="row-link" href="#/${key}/${rec.id}">${esc(label ?? NAMES[key](rec))}</a>`;
 const pill = (v) => (isBlank(v) ? DASH : `<span class="pill">${esc(v)}</span>`);
+
+function paymentInfo(v) {
+  if (isBlank(v)) return null;
+  const raw = String(v).trim();
+  return PAYMENT_STATUSES[raw.toLowerCase()] || { key: 'other', label: raw, tone: 'neutral' };
+}
+const paymentLabel = (v) => paymentInfo(v)?.label || '';
+const isWaitingForPayment = (q) => paymentInfo(q.Payment_Status)?.key === 'waiting';
+function paymentPill(v) {
+  const info = paymentInfo(v);
+  if (!info) return DASH;
+  return `<span class="status status-${info.tone}"><span class="status-dot" aria-hidden="true"></span>${esc(info.label)}</span>`;
+}
+
+/* ---------- Перевірка оплати (підтвердження з вебхука) ---------- */
+
+// Результати перевірок за id замовлення: { state: 'loading' | 'done' | 'error', result?, message? }.
+const paymentChecks = new Map();
+
+// Кнопка доступна лише в живій версії (артефакт не може звертатися до зовнішніх сайтів)
+// і лише для замовлень, що очікують оплати. Перевірка лише читає дані: статус у NocoDB
+// не змінюється.
+const canCheckPayment = (q) => !SNAPSHOT && !isBlank(q.Quote_ID) && (isBlank(q.Payment_Status) || isWaitingForPayment(q));
+
+function paymentOutcome(check) {
+  if (check.state === 'error') return { tone: 'neutral', icon: '?', label: 'Не вдалося перевірити', detail: check.message };
+  const r = check.result;
+  switch (r.outcome) {
+    case 'found': {
+      const when = r.payment.receivedAt ? fmt.dateTime.format(new Date(r.payment.receivedAt)) : '';
+      return {
+        tone: 'good', icon: '✓', label: 'Оплата замовлення знайдена!',
+        detail: `Надійшло ${when}, сума ${fmt.money.format(parseNumber(r.payment.amount))}. Статус у NocoDB не змінено.`,
+      };
+    }
+    case 'already-paid':
+      return { tone: 'neutral', icon: '?', label: 'Замовлення вже оплачене', detail: 'У NocoDB у замовлення вже статус «Оплачено». Оновіть дані.' };
+    case 'not-found':
+      return {
+        tone: 'critical', icon: '✕', label: 'На жаль, оплата не знайдена',
+        detail: r.matches?.length ? 'Є записи про це замовлення, але без підтвердження оплати.' : 'Підтвердження оплати для цього замовлення не надходило.',
+      };
+    case 'amount-mismatch': {
+      const latest = r.matches.find((m) => m.confirmed);
+      const got = parseNumber(latest?.amount);
+      return {
+        tone: 'warning', icon: '!', label: 'Оплату знайдено, але сума не збігається',
+        detail: `Отримано ${isNum(got) ? fmt.money.format(got) : '—'}, у замовленні ${isNum(r.amount) ? fmt.money.format(r.amount) : '—'}. Статус не змінено.`,
+      };
+    }
+    case 'not-waiting':
+      return { tone: 'neutral', icon: '?', label: 'Статус змінився', detail: `У NocoDB зараз статус «${paymentLabel(r.status)}». Оновіть дані.` };
+    default:
+      return null;
+  }
+}
+
+function paymentCheckControl(q) {
+  if (!canCheckPayment(q)) return '';
+  const check = paymentChecks.get(q.id);
+  if (check?.state === 'loading') return '<button type="button" class="check-btn" disabled>Перевіряю…</button>';
+  const button = `<button type="button" class="check-btn" data-check-payment="${q.id}">${check ? 'Перевірити ще раз' : 'Перевірити оплату'}</button>`;
+  const v = check && paymentOutcome(check);
+  if (!v) return button;
+  return `<span class="status status-${v.tone}" tabindex="0" data-tip="${esc(v.detail)}"><span class="status-icon" aria-hidden="true">${v.icon}</span>${esc(v.label)}</span>${button}`;
+}
+
+const paymentCell = (q) => {
+  const control = paymentCheckControl(q);
+  return control ? `<span class="payment-cell">${paymentPill(q.Payment_Status)}${control}</span>` : paymentPill(q.Payment_Status);
+};
+
+// Таблиця знайдених записів вебхука на сторінці замовлення (після перевірки).
+function paymentChecksSection(q) {
+  const check = paymentChecks.get(q.id);
+  if (!check || check.state !== 'done' || !Array.isArray(check.result.matches)) return '';
+  const rows = check.result.matches;
+  const body = rows.length
+    ? `<div class="table-wrap"><table class="data-table"><thead><tr>
+        <th scope="col">Надійшло</th><th scope="col">Дата оплати</th><th scope="col" class="num">Сума</th><th scope="col">Підтверджено</th>
+      </tr></thead><tbody>${rows
+        .map((m) => `<tr>
+          <td class="nowrap">${m.receivedAt ? dateTime(new Date(m.receivedAt)) : DASH}</td>
+          <td class="nowrap">${date(parseIsoDate(m.date))}</td>
+          <td class="num">${money(parseNumber(m.amount))}</td>
+          <td>${m.confirmed ? '<span class="status status-good"><span class="status-icon" aria-hidden="true">✓</span>Так</span>' : '<span class="status status-critical"><span class="status-icon" aria-hidden="true">✕</span>Ні</span>'}</td>
+        </tr>`)
+        .join('')}</tbody></table></div>`
+    : `<div class="card-body">${emptyInline('Записів про оплату цього замовлення у вебхуку немає.')}</div>`;
+  return `<section class="card related">
+    <header class="card-head"><h2>Надходження оплат</h2><span class="count-badge">${fmt.number.format(rows.length)}</span>
+      <span class="card-note">перевірено ${esc(fmt.dateTime.format(new Date(check.result.checkedAt)))}</span></header>
+    ${body}
+  </section>`;
+}
+
+async function runPaymentCheck(id) {
+  const q = db.byId.quotes.get(id);
+  if (!q || paymentChecks.get(id)?.state === 'loading') return;
+  paymentChecks.set(id, { state: 'loading' });
+  rerenderInPlace();
+  try {
+    let res;
+    try {
+      res = await fetch(`/api/quotes/${id}/payment`, { headers: { accept: 'application/json' } });
+    } catch {
+      throw new Error('Немає зв’язку з локальним сервером. Перевірте, чи запущено server.js.');
+    }
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body) throw new Error(body?.error || `Сервер повернув помилку ${res.status}.`);
+    paymentChecks.set(id, { state: 'done', result: body });
+  } catch (err) {
+    paymentChecks.set(id, { state: 'error', message: err.message });
+  }
+  rerenderInPlace();
+}
+
+// Перемальовує поточну сторінку без прокрутки вгору (список — лише таблицю, щоб не втратити фокус).
+function rerenderInPlace() {
+  hideTip();
+  if (route.name === 'list') return renderListRegion(route.key);
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+}
 const countCell = (n) => (n ? fmt.number.format(n) : '<span class="muted">0</span>');
 const clampText = (v) => (isBlank(v) ? DASH : `<span class="clamp">${esc(v)}</span>`);
 const emptyInline = (msg) => `<p class="empty-inline">${esc(msg)}</p>`;
@@ -286,26 +420,37 @@ const VIEWS = {
     icon: 'quote',
     description: 'Усі замовлення з прив’язкою до компаній, контактів, продуктів та лідів.',
     columns: [
-      col('number', 'Номер', (q) => q.Quote_ID, { render: (q) => primaryLink('quotes', q, q.Quote_ID || '#' + q.id), mono: true }),
+      col('number', 'Номер', (q) => q.Quote_ID, { render: (q) => primaryLink('quotes', q, q.Quote_ID || '#' + q.id), mono: true, nowrap: true }),
       col('date', 'Дата', (q) => q.$date, { render: (q) => date(q.$date), nowrap: true }),
       col('company', 'Компанія', (q) => nameOf('companies', q.$company), { render: (q) => ref('companies', q.$company) }),
       col('contact', 'Контакт', (q) => nameOf('contacts', q.$contact), { render: (q) => ref('contacts', q.$contact) }),
       col('product', 'Продукти', (q) => q.$products.map(NAMES.products).join(', '), { render: (q) => refList('products', q.$products) }),
       col('amount', 'Сума', (q) => q.Amount, { render: (q) => money(q.Amount), num: true }),
+      col('payment', 'Оплата', (q) => paymentLabel(q.Payment_Status), { render: paymentCell }),
       col('author', 'Автор', (q) => q.Author, { muted: true }),
     ],
     defaultSort: { key: 'date', dir: 'desc' },
     filters: [
+      { key: 'payment', label: 'Оплата', value: (q) => paymentLabel(q.Payment_Status) },
       { key: 'author', label: 'Автор', value: (q) => q.Author },
       { key: 'product', label: 'Продукт', value: (q) => q.$products.map(NAMES.products) },
     ],
     search: (q) => [
-      q.Quote_ID, q.Notes, q.Author,
+      q.Quote_ID, q.Notes, q.Author, q.Payment_Status, paymentLabel(q.Payment_Status),
       nameOf('companies', q.$company), nameOf('contacts', q.$contact), ...q.$products.map(NAMES.products),
       q.$opportunity?.Opportunity_ID, q.$opportunity?.Description,
     ],
-    summary: (rows) => `Сума: ${money(sumOf(rows, (q) => q.Amount))}`,
-    secondary: (q) => [q.$date && fmt.date.format(q.$date), nameOf('companies', q.$company), isNum(q.Amount) && fmt.money.format(q.Amount)],
+    summary: (rows) => {
+      const waiting = rows.filter(isWaitingForPayment);
+      const total = `Сума: ${money(sumOf(rows, (q) => q.Amount))}`;
+      return waiting.length
+        ? `${total} · очікують оплати: ${fmt.number.format(waiting.length)} на ${money(sumOf(waiting, (q) => q.Amount))}`
+        : total;
+    },
+    secondary: (q) => [
+      q.$date && fmt.date.format(q.$date), nameOf('companies', q.$company),
+      isNum(q.Amount) && fmt.money.format(q.Amount), paymentLabel(q.Payment_Status),
+    ],
   },
 
   opportunities: {
@@ -636,13 +781,16 @@ function recordMeta(r) {
 const DETAILS = {
   quotes(q) {
     const { $company: c, $contact: p, $opportunity: o } = q;
-    const subtitle = [q.$date && `від ${fmt.date.format(q.$date)}`, q.Author && `автор: ${q.Author}`].filter(Boolean).map(esc).join(' · ');
+    const subtitle =
+      [q.$date && `від ${fmt.date.format(q.$date)}`, q.Author && `автор: ${q.Author}`].filter(Boolean).map(esc).join(' · ') +
+      (paymentInfo(q.Payment_Status) ? ` ${paymentPill(q.Payment_Status)}` : '');
     return `${detailHeader('quotes', { kicker: 'Замовлення', title: NAMES.quotes(q), subtitle, metrics: metric('Сума замовлення', money(q.Amount)) })}
       <div class="detail-grid">
         ${card('Деталі замовлення', kv([
           ['Номер замовлення', text(q.Quote_ID)],
           ['Дата', date(q.$date)],
           ['Сума', money(q.Amount)],
+          ['Оплата', paymentCell(q)],
           ['Автор', text(q.Author)],
           ['Примітки', text(q.Notes)],
         ]))}
@@ -656,6 +804,7 @@ const DETAILS = {
           ['Відповідальний', text(o.Owner)],
         ]) : emptyInline('Замовлення не прив’язане до ліда'))}
       </div>
+      ${paymentChecksSection(q)}
       ${related('products', 'Продукти', q.$products, ['name', 'sku', 'category', 'price'], 'products')}
       ${recordMeta(q)}`;
   },
@@ -680,7 +829,7 @@ const DETAILS = {
           ['Продукт', ref('products', o.$product, o.Product)],
         ]))}
       </div>
-      ${related('quotes', 'Замовлення', o.$quotes, ['number', 'date', 'company', 'product', 'amount'], 'quotes')}
+      ${related('quotes', 'Замовлення', o.$quotes, ['number', 'date', 'company', 'product', 'amount', 'payment'], 'quotes')}
       ${recordMeta(o)}`;
   },
 
@@ -702,7 +851,7 @@ const DETAILS = {
         ]))}
         ${card('Опис', isBlank(p.Description) ? emptyInline('Опис відсутній') : `<p class="description">${esc(p.Description)}</p>`)}
       </div>
-      ${related('quotes', 'Замовлення', p.$quotes, ['number', 'date', 'company', 'contact', 'amount'], 'quotes')}
+      ${related('quotes', 'Замовлення', p.$quotes, ['number', 'date', 'company', 'contact', 'amount', 'payment'], 'quotes')}
       ${p.$opportunities.length ? related('opportunities', 'Ліди', p.$opportunities, ['number', 'description', 'stage', 'amount'], 'opps') : ''}
       ${recordMeta(p)}`;
   },
@@ -729,7 +878,7 @@ const DETAILS = {
         ]))}
       </div>
       ${related('contacts', 'Контакти', c.$contacts, ['name', 'title', 'email', 'phone', 'status'], 'contacts')}
-      ${related('quotes', 'Замовлення', c.$quotes, ['number', 'date', 'contact', 'product', 'amount'], 'quotes')}
+      ${related('quotes', 'Замовлення', c.$quotes, ['number', 'date', 'contact', 'product', 'amount', 'payment'], 'quotes')}
       ${c.$opportunities.length ? related('opportunities', 'Ліди', c.$opportunities, ['number', 'description', 'stage', 'amount'], 'opps') : ''}
       ${related('activity', 'Активності', c.$activities, ['type', 'date', 'contact', 'author'], 'activities')}
       ${recordMeta(c)}`;
@@ -756,7 +905,7 @@ const DETAILS = {
           ['Код контакту', `<span class="mono">${text(p.Contact_ID)}</span>`],
         ]))}
       </div>
-      ${related('quotes', 'Замовлення', p.$quotes, ['number', 'date', 'company', 'product', 'amount'], 'quotes')}
+      ${related('quotes', 'Замовлення', p.$quotes, ['number', 'date', 'company', 'product', 'amount', 'payment'], 'quotes')}
       ${p.$opportunities.length ? related('opportunities', 'Ліди', p.$opportunities, ['number', 'description', 'stage', 'amount'], 'opps') : ''}
       ${related('activity', 'Активності', p.$activities, ['type', 'date', 'company', 'author'], 'activities')}
       ${recordMeta(p)}`;
@@ -875,12 +1024,15 @@ function hbarChart(items) {
 function renderDashboard() {
   setTitle('Огляд');
   const quoteSum = sumOf(db.quotes, (q) => q.Amount);
+  const waitingQuotes = db.quotes.filter(isWaitingForPayment);
+  const waitingSum = sumOf(waitingQuotes, (q) => q.Amount);
+  const paidCount = db.quotes.filter((q) => paymentInfo(q.Payment_Status)?.key === 'paid').length;
   const oppSum = sumOf(db.opportunities, (o) => o.Amount);
   const latestActivity = db.activity.reduce((m, a) => (a.$date && (!m || a.$date > m) ? a.$date : m), null);
 
   const tiles = [
-    { href: '#/quotes', label: 'Замовлення', value: fmt.number.format(db.quotes.length), sub: `${fmt.number.format(db.quotes.filter((q) => isNum(q.Amount)).length)} із зазначеною сумою` },
-    { href: '#/quotes', label: 'Сума замовлень', value: compactNumber(quoteSum), tip: fmt.money.format(quoteSum), sub: 'за всіма замовленнями' },
+    { href: '#/quotes', label: 'Замовлення', value: fmt.number.format(db.quotes.length), sub: `${fmt.number.format(paidCount)} оплачено · ${fmt.number.format(waitingQuotes.length)} очікують` },
+    { href: '#/quotes', label: 'Сума замовлень', value: compactNumber(quoteSum), tip: fmt.money.format(quoteSum), sub: `очікує оплати: ${compactNumber(waitingSum)}` },
     { href: '#/opportunities', label: 'Ліди', value: fmt.number.format(db.opportunities.length), sub: `на суму ${compactNumber(oppSum)}`, tip: fmt.money.format(oppSum) },
     { href: '#/companies', label: 'Компанії', value: fmt.number.format(db.companies.length), sub: `${fmt.number.format(db.companies.filter((c) => c.$quotes.length).length)} із замовленнями` },
     { href: '#/contacts', label: 'Контакти', value: fmt.number.format(db.contacts.length), sub: `${fmt.number.format(db.contacts.filter((c) => c.$quotes.length).length)} із замовленнями` },
@@ -903,7 +1055,7 @@ function renderDashboard() {
 
   const recentQuotes = sortRows(db.quotes, VIEWS.quotes, { key: 'date', dir: 'desc' }).slice(0, 8);
   const recentActivities = sortRows(db.activity, VIEWS.activity, { key: 'date', dir: 'desc' }).slice(0, 6);
-  const quoteCols = ['number', 'date', 'company', 'product', 'amount'].map((k) => VIEWS.quotes.columns.find((c) => c.key === k));
+  const quoteCols = ['number', 'date', 'company', 'product', 'amount', 'payment'].map((k) => VIEWS.quotes.columns.find((c) => c.key === k));
 
   const feed = recentActivities
     .map((a) => {
@@ -1283,6 +1435,12 @@ viewEl.addEventListener('click', (e) => {
   if (e.target.closest('[data-reset-list]') && route.name === 'list') {
     delete listState[route.key];
     renderList(route.key);
+    return;
+  }
+
+  const checkBtn = e.target.closest('[data-check-payment]');
+  if (checkBtn) {
+    runPaymentCheck(Number(checkBtn.dataset.checkPayment));
     return;
   }
 

@@ -74,11 +74,11 @@ async function upstreamGet(url) {
       const r = await fetch(url, { headers: { 'xc-token': TOKEN, accept: 'application/json' } });
       return { ok: r.ok, status: r.status, headers: r.headers, text: await r.text() };
     });
-    const body = res.text;
-    if (res.ok) return JSON.parse(body);
+    const text = res.text;
+    if (res.ok) return text ? JSON.parse(text) : null;
 
     const retryable = res.status === 429 || res.status >= 500;
-    if (!retryable || attempt >= MAX_RETRIES) throw new UpstreamError(res.status, body.slice(0, 300));
+    if (!retryable || attempt >= MAX_RETRIES) throw new UpstreamError(res.status, text.slice(0, 300));
 
     const retryAfter = Number(res.headers.get('retry-after'));
     const delay = retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt;
@@ -109,12 +109,20 @@ async function fetchAllRecords(entity) {
       pageSize: String(PAGE_SIZE),
       sort: JSON.stringify([{ field: 'Id', direction: 'asc' }]),
     });
-    const body = await upstreamGet(`${NOCODB_URL}/api/v3/data/${BASE_ID}/${TABLES[entity]}/records?${params}`);
+    const body = await upstreamGet(`${recordsUrl(entity)}?${params}`);
     for (const record of body.records || []) records.push(slimRecord(record));
     if (body.nestedNext) console.warn(`[nocodb] ${entity}: some linked-record lists on page ${page} are truncated`);
     if (!body.next) break;
   }
   return records;
+}
+
+function recordsUrl(entity) {
+  return `${NOCODB_URL}/api/v3/data/${BASE_ID}/${TABLES[entity]}/records`;
+}
+
+async function getRecord(entity, id) {
+  return slimRecord(await upstreamGet(`${recordsUrl(entity)}/${encodeURIComponent(id)}`));
 }
 
 // Turns a fetch/TLS failure into a message the UI or the console can show.
@@ -130,4 +138,4 @@ function describeNetworkError(err) {
     : 'Не вдалося з’єднатися з NocoDB. Перевірте підключення до інтернету.';
 }
 
-module.exports = { TOKEN, TABLES, UpstreamError, fetchAllRecords, describeNetworkError };
+module.exports = { TOKEN, TABLES, UpstreamError, fetchAllRecords, getRecord, describeNetworkError };

@@ -14,6 +14,7 @@
 - Quote_ID, Notes, Author: SingleLineText
 - Amount: Decimal
 - Date/Time: Date
+- Payment_Status: SingleLineText (`c2nhtw47ymucszt`), за замовчуванням «Waiting for payment»; значення «Waiting for payment» / «Paid», згодом «Canceled». В інтерфейсі: «Очікує оплати» / «Оплачено» / «Скасовано»
 - Opportunity → Opportunities [mo] (`cxtmefpoonkw4kl`)
 - Company → Companies [mo] (`cm2uejehlgx6d0p`)
 - Contact → Contacts [mo] (`c858wri1e28m9ms`)

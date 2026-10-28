@@ -13,7 +13,7 @@ const OUT_FILE = path.join(__dirname, 'dist', 'oblik-zamovlen.html');
 
 // Only the fields the UI reads go into the published page.
 const SNAPSHOT_FIELDS = {
-  quotes: ['Quote_ID', 'Notes', 'Amount', 'Date/Time', 'Author', 'Company', 'Contact', 'Products', 'Opportunity', 'CreatedAt', 'UpdatedAt'],
+  quotes: ['Quote_ID', 'Notes', 'Amount', 'Date/Time', 'Author', 'Payment_Status', 'Company', 'Contact', 'Products', 'Opportunity', 'CreatedAt', 'UpdatedAt'],
   opportunities: ['Opportunity_ID', 'Description', 'Company', 'Contact', 'Product', 'Stage', 'Amount', 'Owner', 'CreatedAt', 'UpdatedAt'],
   products: ['Product_ID', 'Customer ID', 'Name', 'Description', 'Category', 'Image', 'Price', 'CreatedAt', 'UpdatedAt'],
   companies: ['Company_ID', 'Name', 'URL', 'Address', 'CreatedAt', 'UpdatedAt'],
